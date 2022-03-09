@@ -19,6 +19,7 @@
 <template xmlns="http://ws.apache.org/ns/synapse" name="read">
     <parameter name="path" description="Path to the file or folder to read"/>
     <parameter name="filePattern" description="File pattern to match when choosing files to read"/>
+    <parameter name="compressPrefix" description="The compress prefix to read a compressed file without decompressing"/>
     <parameter name="readMode" description="Read mode to use"/>
     <parameter name="startLineNum" description="Read file starting from this line"/>
     <parameter name="endLineNum" description="Read file up to this line"/>

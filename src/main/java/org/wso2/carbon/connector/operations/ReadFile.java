@@ -50,6 +50,9 @@ import org.wso2.carbon.connector.pojo.FileReadMode;
 import org.wso2.carbon.connector.utils.Error;
 import org.wso2.carbon.connector.utils.Const;
 import org.wso2.carbon.connector.utils.Utils;
+
+import scala.collection.mutable.StringBuilder;
+
 import org.wso2.carbon.connector.utils.FileObjectDataSource;
 
 import javax.mail.internet.ContentType;
@@ -70,6 +73,7 @@ import java.util.stream.Stream;
  */
 public class ReadFile extends AbstractConnector {
 
+    private static final String COMPRESS_PREFIX = "compressPrefix";
     private static final String PATH_PARAM = "path";
     private static final String FILE_PATTERN_PARAM = "filePattern";
     private static final String ENABLE_LOCK_PARAM = "enableLock";
@@ -104,6 +108,9 @@ public class ReadFile extends AbstractConnector {
             String workingDirRelativePAth = config.path;
             sourcePath = fileSystemHandler.getBaseDirectoryPath() + config.path;
 
+            if (StringUtils.isNotBlank(config.compressPrefix)) {
+                sourcePath = new StringBuilder().append(config.compressPrefix).append(sourcePath).toString();
+            }
             FileSystemManager fsManager = fileSystemHandler.getFsManager();
             FileSystemOptions fso = fileSystemHandler.getFsOptions();
             fileObject = fsManager.resolveFile(sourcePath, fso);
@@ -188,18 +195,32 @@ public class ReadFile extends AbstractConnector {
 
     private class Config {
         String path;
+        
         String filePattern;
+        
         boolean enableLock;
+        
         FileReadMode readMode = FileReadMode.COMPLETE_FILE;
+        
         String includeResultTo;
+        
         String resultPropertyName;
+        
         String contentType;
+        
         String encoding;
+        
         boolean enableStreaming;
+        
         int startLineNum;
+        
         int endLineNum;
+        
         int lineNum;
+        
         String charSet;
+        
+        String compressPrefix;
     }
 
     private Config readAndValidateInputs(MessageContext msgCtx) throws InvalidConfigurationException {
@@ -230,6 +251,7 @@ public class ReadFile extends AbstractConnector {
                 parseInt(Utils.lookUpStringParam(msgCtx, LINE_NUM_PARAM, "0"));
         config.charSet = Utils.
                 lookUpStringParam(msgCtx, CHARSET_PARAM, Const.EMPTY_STRING);
+        config.compressPrefix = Utils.lookUpStringParam(msgCtx, COMPRESS_PREFIX, "");
 
         if (config.includeResultTo.equals(Const.MESSAGE_PROPERTY)
                 && StringUtils.isEmpty(config.resultPropertyName)) {

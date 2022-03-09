@@ -57,6 +57,17 @@
                 {
                   "type": "attribute",
                   "value": {
+                    "name": "compressPrefix",
+                    "displayName": "Compress Prefix",
+                    "inputType": "stringOrExpression",
+                    "defaultValue": "",
+                    "required": "false",
+                    "helpTip": "The compress prefix to read a compressed file without decompressing."
+                  }
+                },
+                {
+                  "type": "attribute",
+                  "value": {
                     "name": "readMode",
                     "displayName": "Read Mode",
                     "inputType": "comboOrExpression",
