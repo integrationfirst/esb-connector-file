@@ -22,7 +22,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>org.wso2.carbon.esb.connector</groupId>
     <artifactId>org.wso2.carbon.esb.connector.file</artifactId>
-    <version>4.0.10</version>
+    <version>4.0.11</version>
     <packaging>jar</packaging>
     <name>WSO2 Carbon - Connector For esb-connector-file</name>
     <url>http://wso2.org</url>
@@ -219,8 +219,8 @@
                 <artifactId>maven-assembly-plugin</artifactId>
                 <executions>
                     <execution>
-                        <id>email-library</id>
-                        <phase>compile</phase>
+                        <id>create-archive</id>
+                        <phase>package</phase>
                         <goals>
                             <goal>attached</goal>
                         </goals>
@@ -301,6 +301,14 @@
                         </goals>
                         <configuration>
                             <artifactItems>
+                            	<artifactItem>
+									<groupId>org.wso2.org.apache.commons</groupId>
+									<artifactId>commons-vfs2</artifactId>
+									<version>${commons.vfs.version}</version>
+                                    <type>jar</type>
+                                    <overWrite>true</overWrite>
+                                    <outputDirectory>target/connector/dependencies</outputDirectory>
+                                </artifactItem>
                                 <artifactItem>
                                     <groupId>org.apache.commons</groupId>
                                     <artifactId>commons-email</artifactId>
