@@ -165,12 +165,13 @@ public class UnzipFile extends AbstractConnector {
             absoluteDestinationPath.replace("." + sourceFile.getName().getExtension(), ""), fso);
         
         final InputStream input = sourceFile.getContent().getInputStream();
-        final OutputStream output = decompressedFileObject.getContent().getOutputStream();
+        
         
         OMElement decompressedFileContentEle = null;
         switch (fileExtension) {
             case "gz":
-                try (GZIPInputStream gZIPInputStream = new GZIPInputStream(input);) {
+                try (GZIPInputStream gZIPInputStream = new GZIPInputStream(input);
+                        final OutputStream output = decompressedFileObject.getContent().getOutputStream();) {
                     IOUtils.copy(gZIPInputStream, output);
                 }
                 final String gzEntryName = sourceFile.getName().getBaseName().replace("/", "--");
@@ -210,11 +211,12 @@ public class UnzipFile extends AbstractConnector {
                 if (!tarEntry.isDirectory()) {
                     final String absolutePath = new StringBuilder().append(folderPathToExtract).append(
                         Const.FILE_SEPARATOR).append(tarEntry.getName()).toString();
-                    
-                    final FileObject decompressedFile = fsManager.resolveFile(
-                        absolutePath, new FileSystemOptions());
-                    
-                    IOUtils.copy(tarArchiveInputStream, decompressedFile.getContent().getOutputStream());
+
+                    final FileObject decompressedFile = fsManager.resolveFile(absolutePath, new FileSystemOptions());
+
+                    try (OutputStream outputStream = decompressedFile.getContent().getOutputStream();) {
+                        IOUtils.copy(tarArchiveInputStream, outputStream);
+                    }
                     break;
                 }
             }
