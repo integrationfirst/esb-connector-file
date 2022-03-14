@@ -24,6 +24,8 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.Arrays;
+import java.util.List;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -36,6 +38,7 @@ import org.apache.commons.vfs2.FileObject;
 import org.apache.commons.vfs2.FileSystemException;
 import org.apache.commons.vfs2.FileSystemManager;
 import org.apache.commons.vfs2.FileSystemOptions;
+import org.apache.commons.vfs2.VFS;
 import org.apache.synapse.MessageContext;
 import org.opensaml.UnsupportedExtensionException;
 import org.wso2.carbon.connector.connection.FileSystemHandler;
@@ -62,6 +65,8 @@ public class UnzipFile extends AbstractConnector {
     private static final String OPERATION_NAME = "unzipFile";
 
     private static final String ERROR_MESSAGE = "Error while performing file:unzip for file ";
+    
+    private static final List<String> KNOWN_EXTENSION = Arrays.asList("tar.gz");
 
     @Override
     public void connect(MessageContext messageContext) throws ConnectException {
@@ -148,14 +153,20 @@ public class UnzipFile extends AbstractConnector {
         FileSystemManager fsManager,
         FileSystemOptions fso) throws IOException, UnsupportedExtensionException {
         //execute decompression
-        final String fileExtension = sourceFile.getName().getExtension();
-
+        String fileExtension = this.getExtension(sourceFile.getName().getBaseName());
+        if(fileExtension == null) {
+            fileExtension = sourceFile.getName().getExtension();
+        }
+        
         final String absoluteDestinationPath = new StringBuilder().append(folderPathToExtract).append(
             Const.FILE_SEPARATOR).append(sourceFile.getName().getBaseName()).toString();
+        
         final FileObject decompressedFileObject = fsManager.resolveFile(
             absoluteDestinationPath.replace("." + sourceFile.getName().getExtension(), ""), fso);
-        final OutputStream output = decompressedFileObject.getContent().getOutputStream();
+        
         final InputStream input = sourceFile.getContent().getInputStream();
+        final OutputStream output = decompressedFileObject.getContent().getOutputStream();
+        
         OMElement decompressedFileContentEle = null;
         switch (fileExtension) {
             case "gz":
@@ -174,14 +185,14 @@ public class UnzipFile extends AbstractConnector {
                 try (GZIPInputStream gZIPInputStream = new GZIPInputStream(input);) {
                     IOUtils.copy(gZIPInputStream, arrayOutputStream);
                 }
-                InputStream inputStream = new ByteArrayInputStream(arrayOutputStream.toByteArray());
+                final InputStream inputTarStream = new ByteArrayInputStream(arrayOutputStream.toByteArray());
 
-                this.decompressTarFile(output, inputStream);
+                this.decompressTarFile(folderPathToExtract, fsManager, inputTarStream);
                 final String tarGzEntryName = sourceFile.getName().getBaseName().replace("/", "--");
                 decompressedFileContentEle = Utils.createOMElement("targzFile", tarGzEntryName + " has been extracted");
                 break;
             case "tar":
-                this.decompressTarFile(output, input);
+                this.decompressTarFile(folderPathToExtract, fsManager, input);
                 final String tarEntryName = sourceFile.getName().getBaseName().replace("/", "--");
                 decompressedFileContentEle = Utils.createOMElement("tarFile", tarEntryName + " has been extracted");
                 break;
@@ -191,16 +202,32 @@ public class UnzipFile extends AbstractConnector {
         return decompressedFileContentEle;
     }
 
-    private void decompressTarFile(final OutputStream output, final InputStream input) throws IOException {
-        try (TarArchiveInputStream tarArchiveInputStream = new TarArchiveInputStream(input);) {
+    private void decompressTarFile(String folderPathToExtract, FileSystemManager fsManager, InputStream inputStream)
+            throws IOException {
+        try (TarArchiveInputStream tarArchiveInputStream = new TarArchiveInputStream(inputStream);) {
             TarArchiveEntry tarEntry = null;
             while ((tarEntry = tarArchiveInputStream.getNextTarEntry()) != null) {
                 if (!tarEntry.isDirectory()) {
-                    IOUtils.copy(tarArchiveInputStream, output);
+                    final String absolutePath = new StringBuilder().append(folderPathToExtract).append(
+                        Const.FILE_SEPARATOR).append(tarEntry.getName()).toString();
+                    
+                    final FileObject decompressedFile = fsManager.resolveFile(
+                        absolutePath, new FileSystemOptions());
+                    
+                    IOUtils.copy(tarArchiveInputStream, decompressedFile.getContent().getOutputStream());
                     break;
                 }
             }
         }
+    }
+
+    private String getExtension(String fileName) {
+        for (String extension : KNOWN_EXTENSION) {
+            if (fileName.endsWith("." + extension)) {
+                return extension;
+            }
+        }
+        return null;
     }
 
     private OMElement decompressZip(
