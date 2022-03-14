@@ -45,6 +45,8 @@
         <bouncycastle.version>1.55</bouncycastle.version>
         <rampart.apache.version>1.6.1-wso2v18</rampart.apache.version>
         <rampart.wso2.version>1.6.1.wso2v18</rampart.wso2.version>
+        <commons-compress.version>1.21</commons-compress.version>
+        <junit.version>4.13.2</junit.version>
         <skip-tests>true</skip-tests>
     </properties>
 
@@ -54,6 +56,11 @@
             <artifactId>synapse-core</artifactId>
             <version>${synapse.version}</version>
         </dependency>
+        <dependency>
+						<groupId>org.apache.commons</groupId>
+						<artifactId>commons-compress</artifactId>
+						<version>${commons-compress.version}</version>
+				</dependency>
         <dependency>
             <groupId>org.apache.synapse</groupId>
             <artifactId>synapse-commons</artifactId>
@@ -75,7 +82,12 @@
             <version>${automation.framework.version}</version>
             <scope>test</scope>
         </dependency>
-
+				<dependency>
+    				<groupId>junit</groupId>
+    				<artifactId>junit</artifactId>
+    				<version>4.13.2</version>
+    				<scope>test</scope>
+				</dependency>
         <dependency>
             <groupId>org.wso2.carbon.automation</groupId>
             <artifactId>org.wso2.carbon.automation.extensions</artifactId>
@@ -301,10 +313,18 @@
                         </goals>
                         <configuration>
                             <artifactItems>
-                            	<artifactItem>
-									<groupId>org.wso2.org.apache.commons</groupId>
-									<artifactId>commons-vfs2</artifactId>
-									<version>${commons.vfs.version}</version>
+                            		<artifactItem>
+																		<groupId>org.apache.commons</groupId>
+																		<artifactId>commons-compress</artifactId>
+																		<version>${commons-compress.version}</version>
+                                    <type>jar</type>
+                                    <overWrite>true</overWrite>
+                                    <outputDirectory>target/connector/dependencies</outputDirectory>
+                                </artifactItem>
+                            		<artifactItem>
+																		<groupId>org.wso2.org.apache.commons</groupId>
+																		<artifactId>commons-vfs2</artifactId>
+																		<version>${commons.vfs.version}</version>
                                     <type>jar</type>
                                     <overWrite>true</overWrite>
                                     <outputDirectory>target/connector/dependencies</outputDirectory>
