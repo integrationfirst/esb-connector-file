@@ -18,12 +18,29 @@
 
 package org.wso2.carbon.connector.operations;
 
+import java.io.BufferedOutputStream;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.util.Arrays;
+import java.util.List;
+import java.util.zip.GZIPInputStream;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
+
 import org.apache.axiom.om.OMElement;
+import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
+import org.apache.commons.compress.archivers.tar.TarArchiveInputStream;
+import org.apache.commons.io.IOUtils;
 import org.apache.commons.vfs2.FileObject;
 import org.apache.commons.vfs2.FileSystemException;
 import org.apache.commons.vfs2.FileSystemManager;
 import org.apache.commons.vfs2.FileSystemOptions;
+import org.apache.commons.vfs2.VFS;
 import org.apache.synapse.MessageContext;
+import org.opensaml.UnsupportedExtensionException;
 import org.wso2.carbon.connector.connection.FileSystemHandler;
 import org.wso2.carbon.connector.core.AbstractConnector;
 import org.wso2.carbon.connector.core.ConnectException;
@@ -32,16 +49,9 @@ import org.wso2.carbon.connector.core.util.ConnectorUtils;
 import org.wso2.carbon.connector.exception.IllegalPathException;
 import org.wso2.carbon.connector.exception.InvalidConfigurationException;
 import org.wso2.carbon.connector.pojo.FileOperationResult;
-import org.wso2.carbon.connector.utils.Error;
 import org.wso2.carbon.connector.utils.Const;
+import org.wso2.carbon.connector.utils.Error;
 import org.wso2.carbon.connector.utils.Utils;
-
-import java.io.BufferedOutputStream;
-import java.io.IOException;
-import java.io.OutputStream;
-import java.util.zip.GZIPInputStream;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipInputStream;
 
 /**
  * Implements unzip file operation
@@ -49,9 +59,14 @@ import java.util.zip.ZipInputStream;
 public class UnzipFile extends AbstractConnector {
 
     private static final String SOURCE_FILE_PATH_PARAM = "sourceFilePath";
+
     private static final String TARGET_DIRECTORY_PARAM = "targetDirectory";
+
     private static final String OPERATION_NAME = "unzipFile";
+
     private static final String ERROR_MESSAGE = "Error while performing file:unzip for file ";
+    
+    private static final List<String> KNOWN_EXTENSION = Arrays.asList("tar.gz");
 
     @Override
     public void connect(MessageContext messageContext) throws ConnectException {
@@ -62,18 +77,15 @@ public class UnzipFile extends AbstractConnector {
         String folderPathToExtract;
         FileObject targetFolder;
         FileOperationResult result;
-
         try {
 
             String connectionName = Utils.getConnectionName(messageContext);
-            filePath = (String) ConnectorUtils.
-                    lookupTemplateParamater(messageContext, SOURCE_FILE_PATH_PARAM);
-            folderPathToExtract = (String) ConnectorUtils.
-                    lookupTemplateParamater(messageContext, TARGET_DIRECTORY_PARAM);
+            filePath = (String) ConnectorUtils.lookupTemplateParamater(messageContext, SOURCE_FILE_PATH_PARAM);
+            folderPathToExtract = (String) ConnectorUtils.lookupTemplateParamater(messageContext,
+                TARGET_DIRECTORY_PARAM);
 
-
-            FileSystemHandler fileSystemHandler = (FileSystemHandler) handler
-                    .getConnection(Const.CONNECTOR_NAME, connectionName);
+            FileSystemHandler fileSystemHandler = (FileSystemHandler) handler.getConnection(Const.CONNECTOR_NAME,
+                connectionName);
             filePath = fileSystemHandler.getBaseDirectoryPath() + filePath;
             folderPathToExtract = fileSystemHandler.getBaseDirectoryPath() + folderPathToExtract;
 
@@ -107,19 +119,17 @@ public class UnzipFile extends AbstractConnector {
             String errorDetail = ERROR_MESSAGE + filePath;
             handleError(messageContext, e, Error.INVALID_CONFIGURATION, errorDetail);
 
-        } catch (IOException e) {       //FileSystemException also handled here
+        } catch (IOException | UnsupportedExtensionException e) { //FileSystemException also handled here
 
             String errorDetail = ERROR_MESSAGE + filePath;
             handleError(messageContext, e, Error.OPERATION_ERROR, errorDetail);
-
         } finally {
 
             if (compressedFile != null) {
                 try {
                     compressedFile.close();
                 } catch (FileSystemException e) {
-                    log.error(Const.CONNECTOR_NAME
-                            + ":Error while closing file object while decompressing the file. "
+                    log.error(Const.CONNECTOR_NAME + ":Error while closing file object while decompressing the file. "
                             + compressedFile);
                 }
             }
@@ -135,71 +145,135 @@ public class UnzipFile extends AbstractConnector {
      * @param fso                 File System Options associated with the file connection
      * @return OMElement with compressed file entries extracted
      * @throws IOException In case of I/O error
+     * @throws UnsupportedExtensionException 
      */
-    private OMElement executeDecompression(FileObject sourceFile, String folderPathToExtract,
-                                           FileSystemManager fsManager, FileSystemOptions fso) throws IOException {
+    private OMElement executeDecompression(
+        FileObject sourceFile,
+        String folderPathToExtract,
+        FileSystemManager fsManager,
+        FileSystemOptions fso) throws IOException, UnsupportedExtensionException {
         //execute decompression
-        String fileExtension = sourceFile.getName().getExtension();
-        OMElement compressedFileContentEle;
-        if (fileExtension.equals("gz")) {
-            FileObject target = fsManager.resolveFile(folderPathToExtract + Const.FILE_SEPARATOR
-                    + sourceFile.getName().getBaseName()
-                    .replace("." + sourceFile.getName().getExtension(), ""), fso);
-            extractGzip(sourceFile, target);
-            String entryName = sourceFile.getName().getBaseName().replace("/", "--");
-            compressedFileContentEle = Utils.
-                    createOMElement("gzFile", entryName + " has been extracted");
-            return compressedFileContentEle;
-        } else {
-            ZipInputStream zipIn = null;
-            compressedFileContentEle = Utils.
-                    createOMElement("zipFileContent", null);
-            try {
-                zipIn = new ZipInputStream(sourceFile.getContent().getInputStream());
-                ZipEntry entry = zipIn.getNextEntry();
-                //iterate over the entries
-                while (entry != null) {
-                    String zipEntryPath = folderPathToExtract + Const.FILE_SEPARATOR + entry.getName();
-                    FileObject zipEntryTargetFile = fsManager.resolveFile(zipEntryPath, fso);
-                    try {
-                        if (!entry.isDirectory()) {
-                            // if the entry is a file, extracts it
-                            extractFile(zipIn, zipEntryTargetFile);
-                            //"/" is not allowed when constructing XML
-                            String entryName = entry.getName().replace("/", "--");
-                            OMElement zipEntryEle = Utils.
-                                    createOMElement(entryName, "extracted");
-                            compressedFileContentEle.addChild(zipEntryEle);
-                        } else {
-                            // if the entry is a directory, make the directory
-                            zipEntryTargetFile.createFolder();
-                        }
-                    } catch (IOException e) {
-                        log.error("Unable to extract the zip file. ", e);
-                    } finally {
-                        try {
-                            zipIn.closeEntry();
-                        } finally {
-                            entry = zipIn.getNextEntry();
-                        }
-                    }
+        String fileExtension = this.getExtension(sourceFile.getName().getBaseName());
+        if(fileExtension == null) {
+            fileExtension = sourceFile.getName().getExtension();
+        }
+        
+        final String absoluteDestinationPath = new StringBuilder().append(folderPathToExtract).append(
+            Const.FILE_SEPARATOR).append(sourceFile.getName().getBaseName()).toString();
+        
+        final FileObject decompressedFileObject = fsManager.resolveFile(
+            absoluteDestinationPath.replace("." + sourceFile.getName().getExtension(), ""), fso);
+        
+        final InputStream input = sourceFile.getContent().getInputStream();
+        
+        
+        OMElement decompressedFileContentEle = null;
+        switch (fileExtension) {
+            case "gz":
+                try (GZIPInputStream gZIPInputStream = new GZIPInputStream(input);
+                        final OutputStream output = decompressedFileObject.getContent().getOutputStream();) {
+                    IOUtils.copy(gZIPInputStream, output);
                 }
-                return compressedFileContentEle;
-            } finally {
-                if (zipIn != null) {
-                    zipIn.close();
+                final String gzEntryName = sourceFile.getName().getBaseName().replace("/", "--");
+                decompressedFileContentEle = Utils.createOMElement("gzFile", gzEntryName + " has been extracted");
+                break;
+            case "zip":
+                decompressedFileContentEle = this.decompressZip(sourceFile, folderPathToExtract, fsManager, fso);
+                break;
+            case "tar.gz":
+                final ByteArrayOutputStream arrayOutputStream = new ByteArrayOutputStream();
+
+                try (GZIPInputStream gZIPInputStream = new GZIPInputStream(input);) {
+                    IOUtils.copy(gZIPInputStream, arrayOutputStream);
+                }
+                final InputStream inputTarStream = new ByteArrayInputStream(arrayOutputStream.toByteArray());
+
+                this.decompressTarFile(folderPathToExtract, fsManager, inputTarStream);
+                final String tarGzEntryName = sourceFile.getName().getBaseName().replace("/", "--");
+                decompressedFileContentEle = Utils.createOMElement("targzFile", tarGzEntryName + " has been extracted");
+                break;
+            case "tar":
+                this.decompressTarFile(folderPathToExtract, fsManager, input);
+                final String tarEntryName = sourceFile.getName().getBaseName().replace("/", "--");
+                decompressedFileContentEle = Utils.createOMElement("tarFile", tarEntryName + " has been extracted");
+                break;
+            default:
+                throw new UnsupportedExtensionException(String.format("Unsupport the %s extension", fileExtension));
+        }
+        return decompressedFileContentEle;
+    }
+
+    private void decompressTarFile(String folderPathToExtract, FileSystemManager fsManager, InputStream inputStream)
+            throws IOException {
+        try (TarArchiveInputStream tarArchiveInputStream = new TarArchiveInputStream(inputStream);) {
+            TarArchiveEntry tarEntry = null;
+            while ((tarEntry = tarArchiveInputStream.getNextTarEntry()) != null) {
+                if (!tarEntry.isDirectory()) {
+                    final String absolutePath = new StringBuilder().append(folderPathToExtract).append(
+                        Const.FILE_SEPARATOR).append(tarEntry.getName()).toString();
+
+                    final FileObject decompressedFile = fsManager.resolveFile(absolutePath, new FileSystemOptions());
+
+                    try (OutputStream outputStream = decompressedFile.getContent().getOutputStream();) {
+                        IOUtils.copy(tarArchiveInputStream, outputStream);
+                    }
+                    break;
                 }
             }
         }
     }
 
-    public static void extractGzip(FileObject source, FileObject target) throws IOException {
-        try (GZIPInputStream gis = new GZIPInputStream(source.getContent().getInputStream());
-             OutputStream fos = target.getContent().getOutputStream()) {
-            byte[] buffer = new byte[1024];
-            int len;
-            while ((len = gis.read(buffer)) > 0) {
-                fos.write(buffer, 0, len);
+    private String getExtension(String fileName) {
+        for (String extension : KNOWN_EXTENSION) {
+            if (fileName.endsWith("." + extension)) {
+                return extension;
+            }
+        }
+        return null;
+    }
+
+    private OMElement decompressZip(
+        FileObject sourceFile,
+        String folderPathToExtract,
+        FileSystemManager fsManager,
+        FileSystemOptions fso) throws IOException {
+
+        OMElement compressedFileContentEle;
+        ZipInputStream zipIn = null;
+        compressedFileContentEle = Utils.createOMElement("zipFileContent", null);
+        try {
+            zipIn = new ZipInputStream(sourceFile.getContent().getInputStream());
+            ZipEntry entry = zipIn.getNextEntry();
+            //iterate over the entries
+            while (entry != null) {
+                String zipEntryPath = folderPathToExtract + Const.FILE_SEPARATOR + entry.getName();
+                FileObject zipEntryTargetFile = fsManager.resolveFile(zipEntryPath, fso);
+                try {
+                    if (!entry.isDirectory()) {
+                        // if the entry is a file, extracts it
+                        extractFile(zipIn, zipEntryTargetFile);
+                        //"/" is not allowed when constructing XML
+                        String entryName = entry.getName().replace("/", "--");
+                        OMElement zipEntryEle = Utils.createOMElement("zipFile", entryName + " has been extracted");
+                        compressedFileContentEle.addChild(zipEntryEle);
+                    } else {
+                        // if the entry is a directory, make the directory
+                        zipEntryTargetFile.createFolder();
+                    }
+                } catch (IOException e) {
+                    log.error("Unable to extract the zip file. ", e);
+                } finally {
+                    try {
+                        zipIn.closeEntry();
+                    } finally {
+                        entry = zipIn.getNextEntry();
+                    }
+                }
+            }
+            return compressedFileContentEle;
+        } finally {
+            if (zipIn != null) {
+                zipIn.close();
             }
         }
     }
@@ -231,15 +305,15 @@ public class UnzipFile extends AbstractConnector {
                     bos.close();
                 } catch (IOException e) {
                     log.error("FileConnector:Unzip Error while closing the BufferedOutputStream to target file: "
-                            + e.getMessage(), e);
+                            + e.getMessage(),
+                        e);
                 }
             }
             if (fOut != null) {
                 try {
                     fOut.close();
                 } catch (IOException e) {
-                    log.error("Error while closing the OutputStream to target file: "
-                            + e.getMessage(), e);
+                    log.error("Error while closing the OutputStream to target file: " + e.getMessage(), e);
                 }
             }
             zipEntryTargetFile.close();
